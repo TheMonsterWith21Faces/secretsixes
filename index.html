@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Secret Sixes</title>
+<style>
+  :root{
+    --bg:#0c0d10; --panel:#171a20; --ink:#e9ecf1; --muted:#a3a7b4; --accent:#ddb64b; --ok:#45b082; --bad:#c05656;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.45 system-ui,Segoe UI,Roboto,Arial}
+  .wrap{max-width:920px;margin:28px auto;padding:0 16px}
+  h1{margin:0 0 14px;font-size:28px;font-weight:800}
+  .panel{background:var(--panel);border-radius:14px;padding:16px;margin:12px 0;box-shadow:0 8px 30px rgba(0,0,0,.25)}
+  .grid{display:grid;gap:14px}
+  .cols-2{grid-template-columns:1fr 1fr}
+  .row{display:flex;gap:10px;align-items:center;flex-wrap:wrap}
+  label{font-size:14px;color:var(--muted)}
+  input[type="number"]{width:120px;padding:10px;border-radius:10px;border:1px solid #2a2e36;background:#101218;color:var(--ink)}
+  button{
+    appearance:none;border:0;border-radius:12px;padding:10px 14px;background:#272c35;color:var(--ink);
+    cursor:pointer;transition:transform .02s ease, background .15s ease; font-weight:700
+  }
+  button:hover{background:#323946}
+  button:active{transform:translateY(1px)}
+  button.primary{background:var(--accent);color:#121212}
+  button.good{background:var(--ok);color:#0d100e}
+  button.bad{background:var(--bad);color:#fff}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  .badge{background:#20252d;border:1px solid #2e3440;padding:6px 10px;border-radius:999px;font-size:13px;color:var(--muted)}
+  .stats{display:flex;gap:12px;flex-wrap:wrap}
+  .big{font-weight:800;color:#fff}
+  .table{display:flex;gap:18px;flex-wrap:wrap;align-items:flex-start}
+  .pile{min-width:220px}
+  .pile h3{margin:0 0 8px;font-size:15px;color:var(--muted);font-weight:600}
+  .cards{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+  .log{font-family:ui-monospace,Consolas,monospace;background:#0f1217;border:1px solid #2a2e36;border-radius:12px;padding:12px;max-height:240px;overflow:auto}
+  .right{margin-left:auto}
+
+  /* Dice images */
+  .die{
+    width:56px;height:56px;border-radius:8px;background:#0f1217;border:1px solid #2f3340;
+    display:flex;align-items:center;justify-content:center;font-weight:800;color:var(--accent)
+  }
+  .die img{max-width:100%;max-height:100%;display:block}
+
+  /* Programmatic cards */
+  .card{
+    width:104px;height:148px;border-radius:12px;background:#f9fafb;color:#111;border:2px solid #d8dce3;
+    box-shadow:0 6px 18px rgba(0,0,0,.35); position:relative; display:grid; place-items:center;
+  }
+  .card.red{color:#b3122c}
+  .corner{
+    position:absolute;left:8px;top:6px;font-size:14px;line-height:1.05;text-align:center;font-weight:800
+  }
+  .corner.bottom{left:auto;right:8px;top:auto;bottom:6px;transform:rotate(180deg)}
+  .pip{display:grid;place-items:center;text-align:center}
+  .rankBig{font-size:34px;font-weight:900;line-height:1}
+  .suitBig{font-size:26px}
+  .mini{font-size:12px}
+</style>
+</head>
+<body>
+<div class="wrap">
+<img src="assets/logo.png" height="50">
+
+  <!-- BANK / BET / CONTROLS -->
+  <div class="panel">
+    <div class="grid cols-2">
+      <div class="row">
+        <label>Bet</label>
+        <input id="betInput" type="number" step="1" min="1" value="10" />
+        <button id="startBtn" class="primary">Start</button>
+        <button id="insuranceBtn">Force Reroll</button>
+        <button id="secondBtn">Second Card</button>
+        <button id="revealBtn" class="good">Reveal</button>
+        <button id="cashoutBtn" class="bad">Cash Out</button>
+      </div>
+      <div class="stats right">
+        <span class="badge">Won: <span id="won" class="big">0</span></span>
+        <span class="badge">Lost: <span id="lost" class="big">0</span></span>
+        <span class="badge">Status: <span id="status" class="big">Waiting…</span></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- TABLE -->
+  <div class="panel">
+    <div class="table">
+      <div class="pile">
+        <h3>Dealer Dice</h3>
+        <div class="row">
+          <div>
+            <div class="badge">Visible</div>
+            <div id="dieVisible" class="die">–</div>
+          </div>
+          <div>
+            <div class="badge">Hidden</div>
+            <div id="dieHidden" class="die">?</div>
+          </div>
+          <div>
+            <div class="badge">Total</div>
+            <div id="dieTotal" class="die">–</div>
+          </div>
+        </div>
+      </div>
+      <div class="pile">
+        <h3>Your Card(s)</h3>
+        <div id="cardsArea" class="cards"></div>
+        <div class="badge">Final value: <span id="playerFinal" class="big">–</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- LOG -->
+  <div class="panel">
+    <div class="row" style="justify-content:space-between">
+      <div class="badge">Round Log</div>
+      <div class="badge">Sounds from <code>assets/</code></div>
+    </div>
+    <div id="log" class="log"></div>
+  </div>
+</div>
+
+<script>
+/* ===========================
+   CONFIG (edit in code)
+   =========================== */
+const CFG = {
+  payout: 1.0,          // 1.0 = even money
+  tiesTo: 'player',     // 'player' | 'house' | 'push'
+  insurancePct: 25,     // % of wager (visible die reroll)
+  secondCardPct: 25,    // % of wager (draw 2nd, keep higher)
+
+  // Card values
+  valueOf(rank){
+    if (rank === 'A') return 1;
+    if (['J','Q','K'].includes(rank)) return 11;
+    return parseInt(rank,10);
+  }
+};
+
+/* ===========================
+   AUDIO
+   =========================== */
+const cardSounds = [
+  new Audio('assets/card1.wav'),
+  new Audio('assets/card2.wav'),
+  new Audio('assets/card3.wav'),
+];
+const winSound = new Audio('assets/win.wav');
+const lossSound = new Audio('assets/loss.wav');
+function playCardSound(){ const a = cardSounds[Math.floor(Math.random()*cardSounds.length)]; try{ a.currentTime=0; a.play(); }catch(e){} }
+function playWin(){ try{ winSound.currentTime=0; winSound.play(); }catch(e){} }
+function playLoss(){ try{ lossSound.currentTime=0; lossSound.play(); }catch(e){} }
+
+/* ===========================
+   DOM
+   =========================== */
+const el = {
+  betInput: document.getElementById('betInput'),
+  startBtn: document.getElementById('startBtn'),
+  insuranceBtn: document.getElementById('insuranceBtn'),
+  secondBtn: document.getElementById('secondBtn'),
+  revealBtn: document.getElementById('revealBtn'),
+  cashoutBtn: document.getElementById('cashoutBtn'),
+  won: document.getElementById('won'),
+  lost: document.getElementById('lost'),
+  status: document.getElementById('status'),
+  dieVisible: document.getElementById('dieVisible'),
+  dieHidden: document.getElementById('dieHidden'),
+  dieTotal: document.getElementById('dieTotal'),
+  cardsArea: document.getElementById('cardsArea'),
+  playerFinal: document.getElementById('playerFinal'),
+  log: document.getElementById('log'),
+};
+
+/* ===========================
+   DICE (PNG)
+   =========================== */
+function setDie(targetEl, value, hidden=false){
+  targetEl.innerHTML = '';
+  if (hidden && !round.dealer.revealed){
+    targetEl.textContent = '?';
+    return;
+  }
+  if (value && value >= 1 && value <= 6){
+    const img = document.createElement('img');
+    img.src = `assets/die${value}.png`;
+    img.alt = String(value);
+    targetEl.appendChild(img);
+  } else {
+    targetEl.textContent = '–';
+  }
+}
+
+/* ===========================
+   PROGRAMMATIC CARD RENDER
+   =========================== */
+const SUITS = ['clubs','spades','hearts','diamonds'];
+const RANKS = ['A','2','3','4','5','6','7','8','9','10','J','Q','K'];
+const SUIT_SYMBOL = { clubs:'♣', spades:'♠', hearts:'♥', diamonds:'♦' };
+
+function cardEl(rank, suit){
+  const div = document.createElement('div');
+  const red = (suit === 'hearts' || suit === 'diamonds');
+  div.className = 'card' + (red ? ' red' : '');
+
+  const cornerTL = document.createElement('div');
+  cornerTL.className = 'corner';
+  cornerTL.innerHTML = `<div class="mini">${rank}</div><div class="mini">${SUIT_SYMBOL[suit]}</div>`;
+
+  const cornerBR = document.createElement('div');
+  cornerBR.className = 'corner bottom';
+  cornerBR.innerHTML = `<div class="mini">${rank}</div><div class="mini">${SUIT_SYMBOL[suit]}</div>`;
+
+  const pip = document.createElement('div');
+  pip.className = 'pip';
+  pip.innerHTML = `<div class="rankBig">${rank}</div><div class="suitBig">${SUIT_SYMBOL[suit]}</div>`;
+
+  div.appendChild(cornerTL);
+  div.appendChild(pip);
+  div.appendChild(cornerBR);
+  return div;
+}
+
+/* ===========================
+   GAME STATE
+   =========================== */
+let totalWon = 0;
+let totalLost = 0;
+
+let round = {
+  inProgress: false,
+  bet: 0,
+  dealer: { v: 0, h: 0, revealed: false },
+  playerCards: [], // {rank, suit, val}
+  usedInsurance: false,
+  usedSecondCard: false
+};
+
+function updateTotals(){
+  el.won.textContent = totalWon.toFixed(2);
+  el.lost.textContent = totalLost.toFixed(2);
+}
+function setStatus(s){ el.status.textContent = s; }
+function logLine(s){ const d=document.createElement('div'); d.textContent=s; el.log.prepend(d); }
+function rollDie(){ return (Math.random()*6|0)+1; }
+
+function freshDeck(){
+  const deck = [];
+  for (const suit of SUITS){
+    for (const rank of RANKS){
+      deck.push({rank, suit, val: CFG.valueOf(rank)});
+    }
+  }
+  for (let i=deck.length-1;i>0;i--){
+    const j = (Math.random()*(i+1))|0;
+    [deck[i], deck[j]] = [deck[j], deck[i]];
+  }
+  return deck;
+}
+let shoe = freshDeck();
+function ensureShoe(n=5){ if (shoe.length < n){ shoe = freshDeck(); logLine('Shuffling a fresh deck.'); } }
+
+function render(){
+  // Dice with images
+  setDie(el.dieVisible, round.inProgress ? round.dealer.v : null, false);
+  setDie(el.dieHidden,  round.inProgress ? round.dealer.h : null, true);
+  el.dieTotal.textContent = (round.inProgress && round.dealer.revealed) ? (round.dealer.v + round.dealer.h) : '–';
+
+  // Cards
+  el.cardsArea.innerHTML = '';
+  for (const c of round.playerCards){
+    el.cardsArea.appendChild(cardEl(c.rank, c.suit));
+  }
+  el.playerFinal.textContent = round.playerCards.length ? Math.max(...round.playerCards.map(c=>c.val)) : '–';
+
+  // Buttons
+  el.insuranceBtn.disabled = !round.inProgress || round.dealer.revealed || round.usedInsurance;
+  el.secondBtn.disabled    = !round.inProgress || round.usedSecondCard || round.playerCards.length === 0;
+  el.revealBtn.disabled    = !round.inProgress || round.dealer.revealed;
+  el.startBtn.disabled     = round.inProgress && !round.dealer.revealed;
+}
+
+/* ===========================
+   ROUND FLOW
+   =========================== */
+function startHand(){
+  const bet = Math.max(1, Math.floor(parseFloat(el.betInput.value || '1')));
+  ensureShoe(3);
+
+  round.inProgress = true;
+  round.bet = bet;
+  round.dealer = { v: rollDie(), h: rollDie(), revealed: false };
+  round.playerCards = [];
+  round.usedInsurance = false;
+  round.usedSecondCard = false;
+
+  const c = shoe.pop();
+  round.playerCards.push(c);
+  playCardSound();
+
+  setStatus('Hand started. Insurance? Second Card? Or Reveal.');
+  logLine(`— New hand — Bet=${bet}. Dealer shows ${round.dealer.v}; hidden ?. You drew ${c.rank} of ${c.suit} (= ${c.val}).`);
+  render();
+}
+
+function buyInsurance(){
+  if (!round.inProgress || round.dealer.revealed || round.usedInsurance) return;
+  const fee = round.bet * (CFG.insurancePct/100);
+  totalLost += fee; updateTotals();
+
+  const before = round.dealer.v;
+  round.dealer.v = rollDie();
+  round.usedInsurance = true;
+
+  logLine(`Insurance (${CFG.insurancePct}%): visible die ${before} → ${round.dealer.v}.`);
+  setStatus(`Insurance used. Visible is now ${round.dealer.v}.`);
+  render();
+}
+
+function buySecondCard(){
+  if (!round.inProgress || round.usedSecondCard || round.playerCards.length === 0) return;
+  ensureShoe(1);
+  const fee = round.bet * (CFG.secondCardPct/100);
+  totalLost += fee; updateTotals();
+
+  const c = shoe.pop();
+  round.playerCards.push(c);
+  playCardSound();
+
+  const best = Math.max(...round.playerCards.map(c=>c.val));
+  logLine(`Second card (${CFG.secondCardPct}%): drew ${c.rank} of ${c.suit} (= ${c.val}). Best now ${best}.`);
+  setStatus('Second card taken (keep the higher).');
+  round.usedSecondCard = true;
+  render();
+}
+
+function resolveHand(){
+  if (!round.inProgress || round.dealer.revealed) return;
+  round.dealer.revealed = true;
+
+  const dealerTotal = round.dealer.v + round.dealer.h;
+  const playerBest  = Math.max(...round.playerCards.map(c=>c.val));
+  let outcome = 'lose';
+
+  if (playerBest > dealerTotal) {
+    outcome = 'win';
+  } else if (playerBest === dealerTotal) {
+    if (CFG.tiesTo === 'player') outcome = 'win';
+    else if (CFG.tiesTo === 'push') outcome = 'push';
+    else outcome = 'lose';
+  }
+
+  if (outcome === 'win'){
+    const prize = round.bet * CFG.payout;
+    totalWon += prize;
+    logLine(`Reveal: hidden ${round.dealer.h} → dealer ${dealerTotal}. You WIN +${prize.toFixed(2)}.`);
+    setStatus(`You win +${prize.toFixed(2)}.`);
+    playWin();
+  } else if (outcome === 'push'){
+    logLine(`Reveal: hidden ${round.dealer.h} → dealer ${dealerTotal}. PUSH.`);
+    setStatus('Push.');
+  } else {
+    totalLost += round.bet;
+    logLine(`Reveal: hidden ${round.dealer.h} → dealer ${dealerTotal}. You LOSE -${round.bet.toFixed(2)}.`);
+    setStatus(`You lose -${round.bet.toFixed(2)}.`);
+    playLoss();
+  }
+
+  updateTotals();
+  render();
+  round.inProgress = false;
+  el.startBtn.disabled = false;
+}
+
+function cashOut(){
+  const net = totalWon - totalLost;
+  const msg = (net >= 0)
+    ? `Cash Out: You’re up +${net.toFixed(2)} chips.`
+    : `Cash Out: You’re down ${net.toFixed(2)} chips.`;
+  alert(msg);
+  logLine(msg);
+}
+
+/* ===========================
+   WIRE UP
+   =========================== */
+el.startBtn.addEventListener('click', startHand);
+el.insuranceBtn.addEventListener('click', buyInsurance);
+el.secondBtn.addEventListener('click', buySecondCard);
+el.revealBtn.addEventListener('click', resolveHand);
+el.cashoutBtn.addEventListener('click', cashOut);
+
+// Boot
+updateTotals();
+render();
+setStatus('Ready. Set bet, then Start.');
+</script>
+</body>
+</html>
